@@ -25,6 +25,7 @@ langchain-community
 crewai_tools
 roboflow
 inference-sdk
+inference
 psutil
 numpy==1.26.4
 plotly

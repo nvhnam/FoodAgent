@@ -25,6 +25,8 @@ import plotly.graph_objects as go
 from class_names import class_names
 
 from inference_sdk import InferenceHTTPClient, InferenceConfiguration
+# from inference import InferencePipeline
+# from inference.core.interfaces.stream.sinks import render_boxes
 
 roboflow_url = os.getenv("ROBOFLOW_API_URL")
 roboflow_key = os.getenv("ROBOFLOW_API_KEY")
@@ -570,14 +572,11 @@ def detect_image_result(detected_image, resized_uploaded_image):
             cv2.rectangle(detected_img_arr_BGR, (label_x, label_y - label_size[1]), 
                         (label_x + label_size[0], label_y + label_size[1]), (0, 255, 0), -1)
             cv2.putText(detected_img_arr_BGR, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-
-            # image_np = np.array(resized_uploaded_image)
             bounding_box_images = extract_bounding_box_image(detected_img_arr_BGR, boxes)
 
             bbox_image_html = ""
             if bounding_box_images:
                 bbox_image = bounding_box_images[0]
-                # cv2.imshow("Original Bounding Box Image (BGR)", bbox_image)
                 bbox_image_rgb = cv2.cvtColor(bbox_image, cv2.COLOR_BGR2RGB)
                 bbox_image_pil = Image.fromarray(bbox_image_rgb, mode='RGB')
                 buffered = io.BytesIO()
@@ -1326,7 +1325,7 @@ def detect_from_file(conf, video_file, model):
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
-    original_size = (int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 3)
+    # original_size = (int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 3)
 
     # with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4', dir='/tmp') as mp4_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4', dir=tempfile.gettempdir()) as mp4_file:
@@ -1337,7 +1336,25 @@ def detect_from_file(conf, video_file, model):
 
     st_frame = st.empty()
 
+    displayed_dishes = set()
+    nutrition_data = []
+
+    total_nutrition_placeholder = st.empty()
+    st.markdown("""<br>
+                <h5 class="detection-results">Detection Results</h5><p class="small-text-below-results">We found the following foods in your meal</p>""", unsafe_allow_html=True)
     
+
+    new_detections = False  
+    detection_results = ""  
+    
+    total_nutrition = {
+        "Calories": 0,
+        "Fat": 0,
+        "Saturates": 0,
+        "Sugar": 0,
+        "Salt": 0
+    }
+    class_names_dict = {item["name"]: item for item in class_names}
 
     col1, col2, col3 = st.columns(3, gap="large")
     with col1:
@@ -1354,152 +1371,134 @@ def detect_from_file(conf, video_file, model):
     stop_pressed = False
     skip_frames = 0
 
-    total_nutrition_placeholder = st.empty()
-    st.markdown("""<br>
-                        <h5 class="detection-results">Detection Results</h5><p class="small-text-below-results">We found the following foods in your meal</p>""", unsafe_allow_html=True)
-    
+    custom_configuration = InferenceConfiguration(confidence_threshold=conf)
+    CLIENT = InferenceHTTPClient(
+        api_url=roboflow_url,
+        api_key=roboflow_key
+    )
+    CLIENT.configure(custom_configuration)
+        
+    for frame_id, frame, predictions in CLIENT.infer_on_stream(video_file, model_id=roboflow_workspace+"/"+roboflow_version):
+        # st.write(predictions)
+        predictions = predictions.get("predictions", [])
+        for prediction in predictions:
+            boxes = []
+            x = prediction['x']
+            y = prediction['y']
+            width = prediction['width']
+            height = prediction['height']
+            confident = round(prediction['confidence'] * 100, 2)
+            class_name = prediction['class']
+            if class_name in class_names_dict:
+                serving = class_names_dict[class_name]["serving_type"]
 
-    displayed_dishes = set()
-    nutrition_data = []
-    
-    total_nutrition = {
-        "Calories": 0,
-        "Fat": 0,
-        "Saturates": 0,
-        "Sugar": 0,
-        "Salt": 0
-    }
-    while True:
+            x1 = int(x - width / 2)
+            y1 = int(y - height / 2)
+            x2 = int(x + width / 2)
+            y2 = int(y + height / 2)
+            boxes.append([x1, y1, x2, y2])
 
-        success, image = cap.read()
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            label = f"{class_name} ({confident}%)"
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            label_x = x1
+            label_y = y1 - 10 if y1 - 10 > 10 else y1 + 10
+            cv2.rectangle(frame, (label_x, label_y - label_size[1]), 
+                        (label_x + label_size[0], label_y + label_size[1]), (0, 255, 0), -1)
+            cv2.putText(frame, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
-        if skip_frames > 0:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, cap.get(cv2.CAP_PROP_POS_FRAMES) + skip_frames)
-            skip_frames = 0
-        if rewind_button:
-            skip_frames = -int(fps * 10) 
-        if fast_forward_button:
-            skip_frames = int(fps * 10)   
-        if stop_button:
-            stop_pressed = True
+            # image_np = np.array(resized_uploaded_image)
+            bounding_box_images = extract_bounding_box_image(frame, boxes)
 
-        if not success or stop_pressed:
-            break
+            bbox_image_html = ""
+            if bounding_box_images:
+                bbox_image = bounding_box_images[0]
+                bbox_image_rgb = cv2.cvtColor(bbox_image, cv2.COLOR_BGR2RGB)
+                bbox_image_pil = Image.fromarray(bbox_image_rgb, mode='RGB')
+                buffered = io.BytesIO()
+                bbox_image_pil.save(buffered, format="JPEG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                bbox_image_html = f'<img src="data:image/jpeg;base64,{img_str}" class="img-each-nutri" ">'
 
-        results = model.predict(source=image, conf=conf, imgsz=640, save=False, device="cpu")
-
-        new_detections = False  
-        detection_results = ""
-
-            
-        for r in results:
-            im_bgr = r.plot()           
             frame_count += 1
             elapsed_time = time.time() - start_time
             if elapsed_time >= 1.0:
                 fps = frame_count / elapsed_time
                 start_time = time.time()
                 frame_count = 0
-            cv2.putText(im_bgr, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-            im_rgb = Image.fromarray(im_bgr[..., ::-1])
-            st_frame.image(im_rgb, caption='Predicted video', use_column_width=True)
-
-    
-            for pred in r.boxes:
-                class_id = int(pred.cls[0].item())
-                class_name = class_names[int(class_id)]["name"]
-                confident = int(round(pred.conf[0].item(), 2)*100)
-                serving = class_names[int(class_id)]["serving_type"]
-
-                if isinstance(pred.xyxy, torch.Tensor):
-                    boxes = pred.xyxy.cpu().numpy()
-                else:
-                    boxes = pred.xyxy.numpy()
             
-                image_np = r.orig_img 
-                
-                bounding_box_images = extract_bounding_box_image(image_np, boxes)
-
-                bbox_image_html = ""
-                if bounding_box_images:
-                    bbox_image = bounding_box_images[0]
-                    bbox_image_pil = Image.fromarray(cv2.cvtColor(bbox_image, cv2.COLOR_BGR2RGB))
-
-                    buffered = io.BytesIO()
-                    bbox_image_pil.save(buffered, format="JPEG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    bbox_image_html = f'<img src="data:image/jpeg;base64,{img_str}" class="img-each-nutri" ">'
-
-
-                if class_name == "Con nguoi (Human)" and class_name not in displayed_dishes:
-                    detection_results += f"<p class='human-class-name'><b>Class name:</b> {class_name}</p><p class='human-confident'><b>Confidence:</b> {confident}%</p><hr style='border: none; border-top: 1px dashed black; width: 80%;'>"
+    
+            if class_name == "Con nguoi (Human)" and class_name not in displayed_dishes:
+                detection_results += f"<p class='human-class-name'><b>Class name:</b> {class_name}</p><p class='human-confident'><b>Confidence:</b> {confident}%</p><hr style='border: none; border-top: 1px dashed black; width: 80%;'>"
+                displayed_dishes.add(class_name)
+                new_detections = True
+            elif class_name not in displayed_dishes:
+                nutrition = class_names_dict[class_name]["nutrition"]
+                if nutrition:
                     displayed_dishes.add(class_name)
                     new_detections = True
-                elif class_name not in displayed_dishes:
-                    nutrition = class_names[int(class_id)]["nutrition"]
-                    if nutrition:
-                        displayed_dishes.add(class_name)
-                        new_detections = True
 
-                        calories_desc = get_nutri_score_color("Calories", nutrition.get('Calories'), serving)
-                        fat_color, fat_desc = get_nutri_score_color("Fat", nutrition.get('Fat'), serving)
-                        saturates_color, saturates_desc = get_nutri_score_color("Saturates", nutrition.get('Saturates'), serving)
-                        sugar_color, sugar_desc = get_nutri_score_color("Sugar", nutrition.get('Sugar'), serving)
-                        salt_color, salt_desc = get_nutri_score_color("Salt", nutrition.get('Salt'), serving)
+                    calories_desc = get_nutri_score_color("Calories", nutrition.get('Calories'), serving)
+                    fat_color, fat_desc = get_nutri_score_color("Fat", nutrition.get('Fat'), serving)
+                    saturates_color, saturates_desc = get_nutri_score_color("Saturates", nutrition.get('Saturates'), serving)
+                    sugar_color, sugar_desc = get_nutri_score_color("Sugar", nutrition.get('Sugar'), serving)
+                    salt_color, salt_desc = get_nutri_score_color("Salt", nutrition.get('Salt'), serving)
 
-                        percentage_contribution = calculate_nutrient_percentage(nutrition)
+                    percentage_contribution = calculate_nutrient_percentage(nutrition)
 
-                        nutrition_str = f"""
-                            <div class="each-nutri-container">
-                            <div class="each-nutri-box" style="background-color: "transparent";">
-                                {bbox_image_html}
-                            </div>
-                            <div  id="calo-each-nutri-box" class="each-nutri-box" style="background-color: transparent;">
-                            <span class="each-nutri-name">Calories</span><br>
-                            <p class="each-nutri-number">{nutrition.get('Calories')} kcal</p>
-                            <span id="calo-each-nutri-percentage" class="each-nutri-percentage">{percentage_contribution['Calories']:.1f}%</span>
-                            </div>
-                            <div class="each-nutri-box" style="background-color: {fat_color};">
-                            <span class="each-nutri-name">Fat</span><br>
-                            <p class="each-nutri-number">{nutrition.get('Fat')} gram</p>
-                            <span class="each-nutri-percentage">{percentage_contribution['Fat']:.1f}%</span>
-                            </div>
-                            <div class="each-nutri-box" style="background-color: {saturates_color};">
-                            <span class="each-nutri-name">Saturates</span><br>
-                            <p class="each-nutri-number">{nutrition.get('Saturates')} gram</p>
-                            <span class="each-nutri-percentage">{percentage_contribution['Saturates']:.1f}%</span>
-                            </div>
-                            <div class="each-nutri-box" style="background-color: {sugar_color};">
-                            <span class="each-nutri-name">Sugar</span><br>
-                            <p class="each-nutri-number">{nutrition.get('Sugar')} gram</p>
-                            <span class="each-nutri-percentage">{percentage_contribution['Sugar']:.1f}%</span>
-                            </div>
-                            <div class="each-nutri-box" style="background-color: {salt_color};">
-                            <span class="each-nutri-name">Salt</span><br>
-                            <p class="each-nutri-number">{nutrition.get('Salt')} gram</p>
-                            <span class="each-nutri-percentage">{percentage_contribution['Salt']:.1f}%</span>
-                            </div>
-                            </div>
-                    """
+                    nutrition_str = f"""
+                        <div class="each-nutri-container">
+                        <div class="each-nutri-box" style="background-color: "transparent";">
+                            {bbox_image_html}
+                        </div>
+                        <div  id="calo-each-nutri-box" class="each-nutri-box" style="background-color: transparent;">
+                        <span class="each-nutri-name">Calories</span><br>
+                        <p class="each-nutri-number">{nutrition.get('Calories')} kcal</p>
+                        <span id="calo-each-nutri-percentage" class="each-nutri-percentage">{percentage_contribution['Calories']:.1f}%</span>
+                        </div>
+                        <div class="each-nutri-box" style="background-color: {fat_color};">
+                        <span class="each-nutri-name">Fat</span><br>
+                        <p class="each-nutri-number">{nutrition.get('Fat')} gram</p>
+                        <span class="each-nutri-percentage">{percentage_contribution['Fat']:.1f}%</span>
+                        </div>
+                        <div class="each-nutri-box" style="background-color: {saturates_color};">
+                        <span class="each-nutri-name">Saturates</span><br>
+                        <p class="each-nutri-number">{nutrition.get('Saturates')} gram</p>
+                        <span class="each-nutri-percentage">{percentage_contribution['Saturates']:.1f}%</span>
+                        </div>
+                        <div class="each-nutri-box" style="background-color: {sugar_color};">
+                        <span class="each-nutri-name">Sugar</span><br>
+                        <p class="each-nutri-number">{nutrition.get('Sugar')} gram</p>
+                        <span class="each-nutri-percentage">{percentage_contribution['Sugar']:.1f}%</span>
+                        </div>
+                        <div class="each-nutri-box" style="background-color: {salt_color};">
+                        <span class="each-nutri-name">Salt</span><br>
+                        <p class="each-nutri-number">{nutrition.get('Salt')} gram</p>
+                        <span class="each-nutri-percentage">{percentage_contribution['Salt']:.1f}%</span>
+                        </div>
+                        </div>
+                """
 
-                        detection_results += (
-            f"""<p class="item-header">{confident}%: <b>{class_name}</b></p>
-            <p class="nutrition-header">Nutrition ({serving})</p>
-            <p class="nutrition-facts">{nutrition_str}</p>
-            <hr style="border: none; border-top: 1px dashed black; width: 80%;">
-            """)
-                        
-                        for key in total_nutrition:
-                            if key in nutrition:
-                                total_nutrition[key] += nutrition[key]
-              
-        if new_detections:
-            scrollable_textbox = f"""<div class="result-nutri-container">{detection_results}</div>"""
-            
-            st.markdown(scrollable_textbox, unsafe_allow_html=True)
+                    detection_results += (
+        f"""<p class="item-header">{confident}%: <b>{class_name}</b></p>
+        <p class="nutrition-header">Nutrition ({serving})</p>
+        <p class="nutrition-facts">{nutrition_str}</p>
+        <hr style="border: none; border-top: 1px dashed black; width: 80%;">
+        """)
+                    
+                    for key in total_nutrition:
+                        if key in nutrition:
+                            total_nutrition[key] += nutrition[key]
 
-        total_nutrition_str = f"""
+        cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # im_rgb = Image.fromarray(frame[..., ::-1])
+        st_frame.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", caption='Predicted video', use_column_width=True)        
+    
+    if new_detections:
+        scrollable_textbox = f"""<div class="result-nutri-container">{detection_results}</div>"""
+        st.markdown(scrollable_textbox, unsafe_allow_html=True)
+    total_nutrition_str = f"""
     <h5 class="total-nutrition-title">Total Nutrition Values</h5>
     <div class="total-nutrition-container">
         <div class="total-nutri-box">
@@ -1524,18 +1523,33 @@ def detect_from_file(conf, video_file, model):
         </div>
     </div>
 """
-        total_nutrition_placeholder.markdown(total_nutrition_str, unsafe_allow_html=True)
+    total_nutrition_placeholder.markdown(total_nutrition_str, unsafe_allow_html=True)
 
-
-        if stop_button:
-            stop_pressed = True
-            stop_button = None
-            break
+    # if stop_button:
+    #     stop_pressed = True
+    #     stop_button = None
+    #     break
 
     cap.release()
     out.release()
     displayed_dishes.clear()
+  
+   
+    # while True:
+    #     success, image = cap.read()
 
+    #     if skip_frames > 0:
+    #         cap.set(cv2.CAP_PROP_POS_FRAMES, cap.get(cv2.CAP_PROP_POS_FRAMES) + skip_frames)
+    #         skip_frames = 0
+    #     if rewind_button:
+    #         skip_frames = -int(fps * 10) 
+    #     if fast_forward_button:
+    #         skip_frames = int(fps * 10)   
+    #     if stop_button:
+    #         stop_pressed = True
+
+    #     if not success or stop_pressed:
+    #         break
 
     # with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", dir="/tmp") as csv_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', dir=tempfile.gettempdir()) as csv_file:
