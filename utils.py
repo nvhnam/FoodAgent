@@ -24,7 +24,7 @@ import plotly.graph_objects as go
 
 from class_names import class_names
 
-from inference_sdk import InferenceHTTPClient
+from inference_sdk import InferenceHTTPClient, InferenceConfiguration
 
 roboflow_url = os.getenv("ROBOFLOW_API_URL")
 roboflow_key = os.getenv("ROBOFLOW_API_KEY")
@@ -312,9 +312,7 @@ from roboflow import Roboflow
 @st.cache_resource
 def load_model():
     # modelpath = r"./model/yolov10/YOLOv10b_VietFood67_SGD_new_bigger.pt"
-    
     # model = YOLOv10(modelpath)
-    # model = YOLOv10.from_pretrained("ThomasNg/yolov10b_food")
 
     rf = Roboflow(api_key=roboflow_key)
 
@@ -472,7 +470,7 @@ def detect_image_result(detected_image, resized_uploaded_image):
         height_width = detected_image["image"]["height"]
 
         # detected_img_arr_RGB = detected_image[0].plot()[:, :, ::1]
-        detected_img_arr_BGR = cv2.cvtColor(np.array(resized_uploaded_image), cv2.COLOR_BGR2RGB)
+        detected_img_arr_BGR = cv2.cvtColor(np.array(resized_uploaded_image), cv2.COLOR_RGB2BGR)
 
         # fig_detected = create_fig(detected_img_arr_BGR, detected=True)
         # st.plotly_chart(fig_detected, use_container_width=True)
@@ -481,218 +479,229 @@ def detect_image_result(detected_image, resized_uploaded_image):
         time_format = current_time.strftime("%d-%m-%Y")
 
         # with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg', dir='/tmp') as img_file:
+        detected_img_placeholder = st.empty()
+        detection_results = ""
+        count_results = ""
+        count_dict = {}
+        food_names = []
+        nutrition_data = []
+        confidences = []
+        counts = []
+        total_nutrition = {
+            "Calories": 0,
+            "Fat": 0,
+            "Saturates": 0,
+            "Sugar": 0,
+            "Salt": 0
+        }
+
+        total_nutrition_placeholder = st.empty()
+        class_names_dict = {item["name"]: item for item in class_names}
+        for prediction in predictions:
+            boxes = []
+            x = prediction['x']
+            y = prediction['y']
+            width = prediction['width']
+            height = prediction['height']
+            conf = round(prediction['confidence'] * 100, 2)
+            class_name = prediction['class']
+            # class_id = prediction['class_id']
+
+            # class_id = int(box.cls[0].item())
+            # class_name = class_names[int(class_id)]["name"] 
+            # food_names.append(class_name)
+            # conf = int(round(box.conf[0].item(), 2)*100)
+            # confidences.append(conf)
+            # serving = class_names["class_name"]["serving_type"]
+        
+            if class_name in class_names_dict:
+                serving = class_names_dict[class_name]["serving_type"]
+
+        # if isinstance(box.xyxy, torch.Tensor):
+        #     boxes = box.xyxy.cpu().numpy()
+        # else:
+        #     boxes = box.xyxy.numpy()
+    
+        # image_np = r.orig_img 
+            # x1, y1 = int(x), int(y)
+            # x2, y2 = int(x + width), int(y + height)
+            x1 = int(x - width / 2)
+            y1 = int(y - height / 2)
+            x2 = int(x + width / 2)
+            y2 = int(y + height / 2)
+            boxes.append([x1, y1, x2, y2])
+
+            cv2.rectangle(detected_img_arr_BGR, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            label = f"{class_name} ({conf}%)"
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            label_x = x1
+            label_y = y1 - 10 if y1 - 10 > 10 else y1 + 10
+            cv2.rectangle(detected_img_arr_BGR, (label_x, label_y - label_size[1]), 
+                        (label_x + label_size[0], label_y + label_size[1]), (0, 255, 0), -1)
+            cv2.putText(detected_img_arr_BGR, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+            # image_np = np.array(resized_uploaded_image)
+            bounding_box_images = extract_bounding_box_image(detected_img_arr_BGR, boxes)
+
+            bbox_image_html = ""
+            if bounding_box_images:
+                bbox_image = bounding_box_images[0]
+                # cv2.imshow("Original Bounding Box Image (BGR)", bbox_image)
+                bbox_image_rgb = cv2.cvtColor(bbox_image, cv2.COLOR_BGR2RGB)
+                bbox_image_pil = Image.fromarray(bbox_image_rgb, mode='RGB')
+                buffered = io.BytesIO()
+                bbox_image_pil.save(buffered, format="JPEG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                bbox_image_html = f'<img src="data:image/jpeg;base64,{img_str}" class="img-each-nutri" ">'
+
+            
+
+            if class_name in count_dict:
+                count_dict[class_name] += 1
+            else:
+                count_dict[class_name] = 1
+
+            if class_name == "Con nguoi (Human)":
+                detection_results += f"<p class='human-class-name'><b>Class name:</b> {class_name}</p><p class='human-confident'><b>Confidence:</b> {conf}%</p><hr style='border: none; border-top: 1px dashed black; width: 80%;'>"
+
+            else:
+                nutrition = class_names_dict[class_name]["nutrition"]
+                if nutrition:
+                    calories_desc = get_nutri_score_color("Calories", nutrition.get('Calories'), serving)
+                    fat_color, fat_desc = get_nutri_score_color("Fat", nutrition.get('Fat'), serving)
+                    saturates_color, saturates_desc = get_nutri_score_color("Saturates", nutrition.get('Saturates'), serving)
+                    sugar_color, sugar_desc = get_nutri_score_color("Sugar", nutrition.get('Sugar'), serving)
+                    salt_color, salt_desc = get_nutri_score_color("Salt", nutrition.get('Salt'), serving)
+
+                    percentage_contribution = calculate_nutrient_percentage(nutrition)
+
+
+                    nutrition_str = f"""
+<div class="each-nutri-container">
+<div class="each-nutri-box" style="background-color: "transparent";">
+    {bbox_image_html}
+</div>
+<div  id="calo-each-nutri-box" class="each-nutri-box" style="background-color: transparent;">
+    <span class="each-nutri-name">Calories</span><br>
+    <p class="each-nutri-number">{nutrition.get('Calories')} kcal</p>
+    <span id="calo-each-nutri-percentage" class="each-nutri-percentage">{percentage_contribution['Calories']:.1f}%</span>
+</div>
+<div class="each-nutri-box" style="background-color: {fat_color};">
+    <span class="each-nutri-name">Fat</span><br>
+    <p class="each-nutri-number">{nutrition.get('Fat')} gram</p>
+    <span class="each-nutri-percentage">{percentage_contribution['Fat']:.1f}%</span>
+</div>
+<div class="each-nutri-box" style="background-color: {saturates_color};">
+    <span class="each-nutri-name">Saturates</span><br>
+    <p class="each-nutri-number">{nutrition.get('Saturates')} gram</p>
+    <span class="each-nutri-percentage">{percentage_contribution['Saturates']:.1f}%</span>
+</div>
+<div class="each-nutri-box" style="background-color: {sugar_color};">
+    <span class="each-nutri-name">Sugar</span><br>
+    <p class="each-nutri-number">{nutrition.get('Sugar')} gram</p>
+    <span class="each-nutri-percentage">{percentage_contribution['Sugar']:.1f}%</span>
+</div>
+<div class="each-nutri-box" style="background-color: {salt_color};">
+    <span class="each-nutri-name">Salt</span><br>
+    <p class="each-nutri-number">{nutrition.get('Salt')} gram</p>
+    <span class="each-nutri-percentage">{percentage_contribution['Salt']:.1f}%</span>
+</div>
+</div>
+                        """
+
+
+                detection_results += (
+                f"""<p class="item-header">{count_dict[class_name]} ({conf}%): <b>{class_name}</b></p>
+                <p class="nutrition-header">Nutrition ({serving}) </p>
+                <p class="nutrition-facts">{nutrition_str}</p>
+                <hr style="border: none; border-top: 1px dashed black; width: 80%;">
+                """)
+
+                for key in total_nutrition:
+                    if key in nutrition:
+                        total_nutrition[key] += nutrition[key]
+
+                nutrition_data.append((
+                    class_name,
+                    serving,
+                    conf,
+                    nutrition.get('Calories'),
+                    nutrition.get('Fat'),
+                    nutrition.get('Saturates'),
+                    nutrition.get('Sugar'),
+                    nutrition.get('Salt')
+                ))
+
+
+            total_nutrition_str = f"""
+    <h5 class="total-nutrition-title">Total Nutrition Values</h5>
+    <div class="total-nutrition-container">
+        <div class="total-nutri-box" id="calo-box">
+            <span class="total-nutri-num">{total_nutrition['Calories']:.1f} kcal</span><br>
+            <span class="total-nutri-value-name">Calories</span>
+        </div>
+        <div class="total-nutri-box">
+            <span class="total-nutri-num">{total_nutrition['Fat']:.1f} gram</span><br>
+            <span class="total-nutri-value-name">Fat</span>
+        </div>
+        <div class="total-nutri-box">
+            <span class="total-nutri-num">{total_nutrition['Saturates']:.1f} gram</span><br>
+            <span class="total-nutri-value-name">Saturates</span>
+        </div>
+        <div class="total-nutri-box">
+            <span class="total-nutri-num">{total_nutrition['Sugar']:.1f} gram</span><br>
+            <span class="total-nutri-value-name">Sugar</span>
+        </div>
+        <div class="total-nutri-box">
+            <span class="total-nutri-num">{total_nutrition['Salt']:.1f} gram</span><br>
+            <span class="total-nutri-value-name">Salt</span>
+        </div>
+    </div>
+"""
+
+        detected_img_placeholder.image(cv2.cvtColor(detected_img_arr_BGR, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg', dir=tempfile.gettempdir()) as img_file:
             img_filename = img_file.name
-            cv2.imwrite(img_filename, detected_img_arr_BGR)
+            cv2.imwrite(img_filename, detected_img_arr_BGR)   
         with open(img_filename, 'rb') as file:
             the_img = file.read()
+        # detection_results += total_nutrition_str
+        total_nutrition_placeholder.markdown(total_nutrition_str, unsafe_allow_html=True)
+
+        for object_type, count in count_dict.items():
+            # st.write(object_type)
+            the_name = class_names_dict[object_type]["name"]
+            counts.append(count)
+            # detection_results += f"<b style='color: black;'>Count of {the_name}:</b> {count}<br>"
+            count_results += f"""
+            <p class="total-count-result-text">{the_name}: {count}<hr class="dash-line-below-count-results"></p>"""
+            
+        scrollable_textbox = f"""<div class="result-nutri-container">{detection_results}</div>"""
         
-            detection_results = ""
-            count_results = ""
-            count_dict = {}
-            food_names = []
-            nutrition_data = []
-            confidences = []
-            counts = []
-            total_nutrition = {
-                "Calories": 0,
-                "Fat": 0,
-                "Saturates": 0,
-                "Sugar": 0,
-                "Salt": 0
-            }
-
-            total_nutrition_placeholder = st.empty()
-            class_names_dict = {item["name"]: item for item in class_names}
-            for prediction in predictions:
-                boxes = []
-                x = prediction['x']
-                y = prediction['y']
-                width = prediction['width']
-                height = prediction['height']
-                conf = round(prediction['confidence'] * 100, 2)
-                class_name = prediction['class']
-                # class_id = prediction['class_id']
-
-                # class_id = int(box.cls[0].item())
-                # class_name = class_names[int(class_id)]["name"] 
-                # food_names.append(class_name)
-                # conf = int(round(box.conf[0].item(), 2)*100)
-                # confidences.append(conf)
-                # serving = class_names["class_name"]["serving_type"]
-            
-                if class_name in class_names_dict:
-                    serving = class_names_dict[class_name]["serving_type"]
-
-            # if isinstance(box.xyxy, torch.Tensor):
-            #     boxes = box.xyxy.cpu().numpy()
-            # else:
-            #     boxes = box.xyxy.numpy()
+        st.markdown("""<br>
+                    <h5 class="detection-results">Detection Results</h5><p class="small-text-below-results">We found the following foods in your meal</p>""", unsafe_allow_html=True)
         
-            # image_np = r.orig_img 
-                # x1, y1 = int(x), int(y)
-                # x2, y2 = int(x + width), int(y + height)
-                x1 = x - width / 2
-                x2 = x + width / 2
-                y1 = y - height / 2
-                y2 = y + height / 2
-                boxes.append([x1, y1, x2, y2])
+        st.markdown(f'<div class="total-count-result-div">{count_results}</div>', unsafe_allow_html=True)
+        st.markdown(scrollable_textbox, unsafe_allow_html=True)
+        # st.write("Total nutrient values: ", total_nutrition)
+        # st.write("Each dish nutrient value: ", nutrition_data)
 
-                # image_np = np.array(resized_uploaded_image)
-                bounding_box_images = extract_bounding_box_image(detected_img_arr_BGR, boxes)
+        add_nutrient_values(dish_nutrient=nutrition_data, total_nutrient=total_nutrition)
 
-                bbox_image_html = ""
-                if bounding_box_images:
-                    bbox_image = bounding_box_images[0]
-                    # cv2.imshow("Original Bounding Box Image (BGR)", bbox_image)
-                    bbox_image_rgb = cv2.cvtColor(bbox_image, cv2.COLOR_BGR2RGB)
-                    bbox_image_pil = Image.fromarray(bbox_image_rgb, mode='RGB')
-                    buffered = io.BytesIO()
-                    bbox_image_pil.save(buffered, format="JPEG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    bbox_image_html = f'<img src="data:image/jpeg;base64,{img_str}" class="img-each-nutri" ">'
+        # rows = zip(food_names, confidences, counts)
+        # rows = zip(nutrition_data)
 
-                
-
-                if class_name in count_dict:
-                    count_dict[class_name] += 1
-                else:
-                    count_dict[class_name] = 1
-
-                if class_name == "Con nguoi (Human)":
-                    detection_results += f"<p class='human-class-name'><b>Class name:</b> {class_name}</p><p class='human-confident'><b>Confidence:</b> {conf}%</p><hr style='border: none; border-top: 1px dashed black; width: 80%;'>"
-
-                else:
-                    nutrition = class_names_dict[class_name]["nutrition"]
-                    if nutrition:
-                        calories_desc = get_nutri_score_color("Calories", nutrition.get('Calories'), serving)
-                        fat_color, fat_desc = get_nutri_score_color("Fat", nutrition.get('Fat'), serving)
-                        saturates_color, saturates_desc = get_nutri_score_color("Saturates", nutrition.get('Saturates'), serving)
-                        sugar_color, sugar_desc = get_nutri_score_color("Sugar", nutrition.get('Sugar'), serving)
-                        salt_color, salt_desc = get_nutri_score_color("Salt", nutrition.get('Salt'), serving)
-
-                        percentage_contribution = calculate_nutrient_percentage(nutrition)
-
-
-                        nutrition_str = f"""
-<div class="each-nutri-container">
-    <div class="each-nutri-box" style="background-color: "transparent";">
-        {bbox_image_html}
-    </div>
-    <div  id="calo-each-nutri-box" class="each-nutri-box" style="background-color: transparent;">
-        <span class="each-nutri-name">Calories</span><br>
-        <p class="each-nutri-number">{nutrition.get('Calories')} kcal</p>
-        <span id="calo-each-nutri-percentage" class="each-nutri-percentage">{percentage_contribution['Calories']:.1f}%</span>
-    </div>
-    <div class="each-nutri-box" style="background-color: {fat_color};">
-        <span class="each-nutri-name">Fat</span><br>
-        <p class="each-nutri-number">{nutrition.get('Fat')} gram</p>
-        <span class="each-nutri-percentage">{percentage_contribution['Fat']:.1f}%</span>
-    </div>
-    <div class="each-nutri-box" style="background-color: {saturates_color};">
-        <span class="each-nutri-name">Saturates</span><br>
-        <p class="each-nutri-number">{nutrition.get('Saturates')} gram</p>
-        <span class="each-nutri-percentage">{percentage_contribution['Saturates']:.1f}%</span>
-    </div>
-    <div class="each-nutri-box" style="background-color: {sugar_color};">
-        <span class="each-nutri-name">Sugar</span><br>
-        <p class="each-nutri-number">{nutrition.get('Sugar')} gram</p>
-        <span class="each-nutri-percentage">{percentage_contribution['Sugar']:.1f}%</span>
-    </div>
-    <div class="each-nutri-box" style="background-color: {salt_color};">
-        <span class="each-nutri-name">Salt</span><br>
-        <p class="each-nutri-number">{nutrition.get('Salt')} gram</p>
-        <span class="each-nutri-percentage">{percentage_contribution['Salt']:.1f}%</span>
-    </div>
-</div>
-                            """
-
-
-                    detection_results += (
-                    f"""<p class="item-header">{count_dict[class_name]} ({conf}%): <b>{class_name}</b></p>
-                    <p class="nutrition-header">Nutrition ({serving}) </p>
-                    <p class="nutrition-facts">{nutrition_str}</p>
-                    <hr style="border: none; border-top: 1px dashed black; width: 80%;">
-                    """)
-
-                    for key in total_nutrition:
-                        if key in nutrition:
-                            total_nutrition[key] += nutrition[key]
-
-                    nutrition_data.append((
-                        class_name,
-                        serving,
-                        conf,
-                        nutrition.get('Calories'),
-                        nutrition.get('Fat'),
-                        nutrition.get('Saturates'),
-                        nutrition.get('Sugar'),
-                        nutrition.get('Salt')
-                    ))
-
-
-                total_nutrition_str = f"""
-        <h5 class="total-nutrition-title">Total Nutrition Values</h5>
-        <div class="total-nutrition-container">
-            <div class="total-nutri-box" id="calo-box">
-                <span class="total-nutri-num">{total_nutrition['Calories']:.1f} kcal</span><br>
-                <span class="total-nutri-value-name">Calories</span>
-            </div>
-            <div class="total-nutri-box">
-                <span class="total-nutri-num">{total_nutrition['Fat']:.1f} gram</span><br>
-                <span class="total-nutri-value-name">Fat</span>
-            </div>
-            <div class="total-nutri-box">
-                <span class="total-nutri-num">{total_nutrition['Saturates']:.1f} gram</span><br>
-                <span class="total-nutri-value-name">Saturates</span>
-            </div>
-            <div class="total-nutri-box">
-                <span class="total-nutri-num">{total_nutrition['Sugar']:.1f} gram</span><br>
-                <span class="total-nutri-value-name">Sugar</span>
-            </div>
-            <div class="total-nutri-box">
-                <span class="total-nutri-num">{total_nutrition['Salt']:.1f} gram</span><br>
-                <span class="total-nutri-value-name">Salt</span>
-            </div>
-        </div>
-    """
-
-
-            # detection_results += total_nutrition_str
-            total_nutrition_placeholder.markdown(total_nutrition_str, unsafe_allow_html=True)
-
-            for object_type, count in count_dict.items():
-                # st.write(object_type)
-                the_name = class_names_dict[object_type]["name"]
-                counts.append(count)
-                # detection_results += f"<b style='color: black;'>Count of {the_name}:</b> {count}<br>"
-                count_results += f"""
-                <p class="total-count-result-text">{the_name}: {count}<hr class="dash-line-below-count-results"></p>"""
-                
-            scrollable_textbox = f"""<div class="result-nutri-container">{detection_results}</div>"""
-            
-            st.markdown("""<br>
-                        <h5 class="detection-results">Detection Results</h5><p class="small-text-below-results">We found the following foods in your meal</p>""", unsafe_allow_html=True)
-            
-            st.markdown(f'<div class="total-count-result-div">{count_results}</div>', unsafe_allow_html=True)
-            st.markdown(scrollable_textbox, unsafe_allow_html=True)
-            # st.write("Total nutrient values: ", total_nutrition)
-            # st.write("Each dish nutrient value: ", nutrition_data)
-
-            add_nutrient_values(dish_nutrient=nutrition_data, total_nutrient=total_nutrition)
-
-            # rows = zip(food_names, confidences, counts)
-            # rows = zip(nutrition_data)
-
-            # with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', dir='/tmp') as csv_file:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', dir=tempfile.gettempdir()) as csv_file:
-                csv_filename = csv_file.name
-            with open(csv_filename, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(["Food Name", "Serving", "Confidence (%)", "Calories (kcal)", "Fat (g)", "Saturates (g)", "Sugar (g)", "Salt (g)"])
-                writer.writerows(nutrition_data)
-            with open(csv_filename, 'rb') as file:
-                the_csv = file.read()
+        # with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', dir='/tmp') as csv_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', dir=tempfile.gettempdir()) as csv_file:
+            csv_filename = csv_file.name
+        with open(csv_filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Food Name", "Serving", "Confidence (%)", "Calories (kcal)", "Fat (g)", "Saturates (g)", "Sugar (g)", "Salt (g)"])
+            writer.writerows(nutrition_data)
+        with open(csv_filename, 'rb') as file:
+            the_csv = file.read()
+    
+    
         col1, col2 = st.columns(2, gap="large")
         with col1:    
             download_pic = st.download_button(label="Download Predicted Image",
@@ -783,11 +792,12 @@ def detect_image(conf, uploaded_file, model, url=False):
                 # # img_buffer.seek(0)
                 # # base64_encoded = base64.b64encode(img_buffer.getvalue()).decode("utf-8")
                 # detected_image = model.predict(temp_file_path, confidence=50, format="image_and_json")
+                custom_configuration = InferenceConfiguration(confidence_threshold=conf)
                 CLIENT = InferenceHTTPClient(
                     api_url=roboflow_url,
                     api_key=roboflow_key
                 )
-
+                CLIENT.configure(custom_configuration)
                 detected_image = CLIENT.infer(temp_file_path, model_id=roboflow_workspace+"/"+roboflow_version)
                 detect_image_result(detected_image, resized_uploaded_image)        
 
