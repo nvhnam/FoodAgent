@@ -1,5 +1,5 @@
 import av
-from ultralytics import YOLOv10
+# from ultralytics import YOLOv10
 import streamlit as st
 import cv2
 from PIL import Image
@@ -88,6 +88,43 @@ def convert_youtube_url(url):
         video_id = match.group(1)
         return f"https://youtu.be/{video_id}"
     return None
+
+@st.fragment
+def download_results(media=None, csv=None, media_filename=None, csv_filename=None, time_format=None, is_video=False, is_youtube=False):
+    if is_youtube:
+        download_csv = st.download_button(label="Download Predictions CSV",
+                        data=csv,
+                        file_name=f"{time_format}.csv", 
+                        use_container_width=True,
+                        key=f"download_csv3_button_{time_format}")
+        if download_csv:
+            os.remove(csv_filename)
+    else:
+        col1, col2 = st.columns(2, gap="large")
+        with col1:
+            if is_video:
+                download_media = st.download_button(label="Download Processed Video",
+                                data=media,
+                                mime="video/mp4",
+                                file_name=f"{time_format}.mp4", 
+                                use_container_width=True,)
+            else:
+                download_media = st.download_button(label="Download Predicted Image",
+                                data=media,
+                                mime="image/jpg",
+                                file_name=f"{time_format}.jpg", 
+                                use_container_width=True,
+                                key=f"download_pic_button_{time_format}")
+            if download_media:
+                os.remove(media_filename)
+        with col2: 
+            download_csv = st.download_button(label="Download Predictions CSV", 
+                                data=csv, 
+                                file_name=f"{time_format}.csv", 
+                                use_container_width=True,
+                                key=f"download_csv_button_{time_format}")
+            if download_csv:
+                os.remove(csv_filename)
 
 
 def _display_detected_frame(conf, model, youtube_url=""):
@@ -294,13 +331,7 @@ def _display_detected_frame(conf, model, youtube_url=""):
                 
                 st.toast("Prediction completed. Results saved to CSV.", icon="✅")
                 time.sleep(3000)
-                download_csv = st.download_button(label="Download Predictions CSV",
-                                data=the_csv,
-                                file_name=f"{time_format}.csv", 
-                                use_container_width=True,
-                                key=f"download_csv3_button_{time_format}")
-                if download_csv:
-                    os.remove(csv_filename)
+                download_results(media=None, csv=the_csv, csv_filename=csv_filename ,time_format=time_format ,is_youtube=True)
             except ConnectionError as e:
                 st.error(f"Failed to open YouTube video stream: {e}")
         else:
@@ -701,25 +732,8 @@ def detect_image_result(detected_image, resized_uploaded_image):
         with open(csv_filename, 'rb') as file:
             the_csv = file.read()
     
-    
-        col1, col2 = st.columns(2, gap="large")
-        with col1:    
-            download_pic = st.download_button(label="Download Predicted Image",
-                                    data=the_img,
-                                    mime="image/jpg",
-                                    file_name=f"{time_format}.jpg", 
-                                    use_container_width=True,
-                                    key=f"download_pic_button_{time_format}")
-            if download_pic:
-                os.remove(img_filename)
-        with col2: 
-            download_csv = st.download_button(label="Download Predictions CSV", 
-                               data=the_csv, 
-                               file_name=f"{time_format}.csv", 
-                               use_container_width=True,
-                               key=f"download_csv_button_{time_format}")
-            if download_csv:
-                os.remove(csv_filename)
+        download_results(media=the_img, csv=the_csv, media_filename=img_filename, csv_filename=csv_filename, time_format=time_format)
+        
         st.divider()
 
     else:
@@ -748,6 +762,8 @@ def detect_image(conf, uploaded_file, model, url=False):
             st.session_state.show_image = not st.session_state.show_image
             if reset == True:
                 st.session_state.is_reset = not st.session_state.is_reset
+                st.session_state.dish_nutrient_values = []
+                st.session_state.total_nutrient_values = []
         
         original_image = st.empty()
 
@@ -1531,19 +1547,20 @@ def detect_from_file(conf, video_file, model):
     with open(csv_filename, "rb") as file:
         the_csv = file.read()
     
-    col1, col2 = st.columns(2, gap="large")
-    with col1:    
-        download_video = st.download_button(label="Download Processed Video",
-                                data=the_mp4,
-                                mime="video/mp4",
-                                file_name=f"{timestamp}.mp4", 
-                                use_container_width=True,)
-        if download_video:
-            os.remove(mp4_filename)
-    with col2: 
-        download_csv = st.download_button(label="Download Predictions CSV", 
-                            data=the_csv, 
-                            file_name=f"{timestamp}.csv", 
-                            use_container_width=True,)
-        if download_csv:
-            os.remove(csv_filename)
+    download_results(media=the_mp4, csv=the_csv, media_filename=mp4_filename, csv_filename=csv_filename, time_format=timestamp, is_video=True)
+    # col1, col2 = st.columns(2, gap="large")
+    # with col1:    
+    #     download_video = st.download_button(label="Download Processed Video",
+    #                             data=the_mp4,
+    #                             mime="video/mp4",
+    #                             file_name=f"{timestamp}.mp4", 
+    #                             use_container_width=True,)
+    #     if download_video:
+    #         os.remove(mp4_filename)
+    # with col2: 
+    #     download_csv = st.download_button(label="Download Predictions CSV", 
+    #                         data=the_csv, 
+    #                         file_name=f"{timestamp}.csv", 
+    #                         use_container_width=True,)
+    #     if download_csv:
+    #         os.remove(csv_filename)
