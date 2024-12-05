@@ -1,0 +1,45 @@
+torch==2.0.1
+torchvision==0.15.2
+onnx==1.14.0
+onnxruntime==1.15.1
+pycocotools==2.0.7
+PyYAML==6.0.1
+scipy==1.13.0
+onnxslim==0.1.31
+onnxruntime-gpu==1.18.0
+# gradio==4.31.5
+opencv-python==4.9.0.80
+psutil==5.9.8
+py-cpuinfo==9.0.0
+huggingface-hub==0.23.2
+safetensors==0.4.3
+# opencv-python
+streamlit==1.38.0
+pillow
+crewai
+langchain
+langchain-core
+langchain-google-genai
+duckduckgo-search 
+langchain-community
+crewai_tools
+roboflow
+inference-sdk
+psutil
+numpy==1.26.4
+plotly
+dill
+streamlit-webrtc 
+av
+pafy
+scipy
+youtube_dl==2020.12.2
+pytube
+# huggingface_hub
+yt_dlp
+# onnxruntime
+pytubefix
+# torch==2.3.0
+matplotlib==3.9.1
+# torchvision==0.18.0
+streamlit_navigation_bar
